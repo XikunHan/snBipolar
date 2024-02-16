@@ -1,0 +1,361 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# setting 
+```{r}
+
+library(data.table)
+setwd("./publication/data")
+dir_publication <- "./"
+```
+
+
+
+# DEG
+```{r}
+
+df <- fread("./DEG/meta_analysis_IVW_MASTlmm_BD.csv")
+df
+
+table(df$cell_type.x)
+
+length(unique(df$cell_type.x))
+df
+df[, sig_McLean := ifelse(FDR.x < 0.01 & abs(logFC.x) > 0.2, 1, 0)]
+df[, sig_MtSinai := ifelse(FDR.y < 0.01 & abs(logFC.y) > 0.2, 1, 0)]
+df[, sig_Meta_tier2 := ifelse(FDR < 0.01 & abs(b_meta) > 0.2 & (logFC.x * logFC.y > 0), 1, 0)]
+
+df_merge <- fread("./DEG/df_DEGs_BD_merge_all.csv")
+names(df_merge)
+df[, table(ID %in% df_merge[sig_overlap_DEG==1, ID])]
+df[, sig_Meta := ifelse(ID %in% df_merge[sig_overlap_DEG==1, ID], 1, 0)]
+
+
+df_overlap <- df[, list(cell_type = cell_type.x, gene = gene.x, sig_McLean, sig_MtSinai, sig_Meta)]
+df_overlap <- tidyr::gather(df_overlap, "cohort", "sig", -c(cell_type, gene))
+df_overlap <- df_overlap[df_overlap$sig != 0, ]
+df_overlap
+
+
+df_overlap_list <- split(df_overlap$gene,  f = list(df_overlap$cell_type, df_overlap$cohort))
+df_overlap_list
+
+
+N_gene <- length(unique(df$gene.x))
+
+
+cell_type_i <- "Endo"
+
+names(df_overlap_list)
+
+
+df_res <- list()
+
+for(cell_type_i in unique(df$cell_type.x)) {
+  
+  df_test <- df_overlap_list[paste0(cell_type_i, ".", c("sig_Meta", "sig_McLean"))]
+df_res[[paste0("Meta_McL__", cell_type_i)]] <- SuperExactTest::supertest(df_test , n = N_gene)$overlap.sizes[[3]]
+
+df_test <- df_overlap_list[paste0(cell_type_i, ".", c("sig_Meta", "sig_MtSinai"))]
+df_res[[paste0("Meta_MSSM__", cell_type_i)]] <- SuperExactTest::supertest(df_test , n = N_gene)$overlap.sizes[[3]]
+
+df_test <- df_overlap_list[paste0(cell_type_i, ".", c("sig_McLean", "sig_MtSinai"))]
+df_res[[paste0("McL_MSSM__", cell_type_i)]] <- SuperExactTest::supertest(df_test , n = N_gene)$overlap.sizes[[3]]
+
+  
+}
+
+
+
+
+df_res <- transpose(as.data.table(df_res), keep.names = "rn")
+df_res[, cell_type := stringr::str_split_fixed(rn, "__", 2)[, 2]]
+df_res[, cohort := stringr::str_split_fixed(rn, "__", 2)[, 1]]
+df_res
+
+
+df_res <- df_res[, list(cell_type, cohort, P = V1)]
+df_res
+
+df_res$cohort <- factor(df_res$cohort, levels = c("Meta_McL", "Meta_MSSM", "McL_MSSM"))
+
+df_res_s <- tidyr::spread(df_res, key = "cohort", value = P)
+df_res_s
+
+df_cols = fread('./GWAS/celltype_stats.tsv')
+df_cols <- df_cols[, list(cell_type = celltype, color)]
+df_cols
+
+df_cols
+
+cols = fread('./GWAS/celltype_stats.tsv')
+cols$label <- 1:nrow(cols)
+v_cols <- cols$color
+names(v_cols) <- cols$celltype
+v_cols
+
+
+df_res_s <- merge(df_res_s, df_cols, by = "cell_type", sort = FALSE)
+df_res_s
+
+
+df_input <- df_res_s[,2:4]
+
+setDF(df_input)
+row.names(df_input) <- df_res_s$cell_type
+
+df_input
+
+
+str(df_input)
+
+v_order_cell_type <- c( "Ex-L2", "Ex-L23", "Ex-L3", "Ex-L4_MYLK","Ex-L45_MET", "Ex-L45_LRRK1", "Ex-L5b_HTR2C", "Ex-L56", "Ex-L56_CC_NTNG2",  "Ex-L6_CC_SEMA3A", "Ex-L6b_SEMA3D", "Ex-L6b_SEMA3E", "In-Rosehip_CHST9", "In-Rosehip_TRPC3","In-Reelin","In-VIP", "In-PV_Chandelier", "In-PV_Basket", "In-SST",  "Oli", "OPC","Ast",  "Mic","Endo", "Pericytes")
+v_order_cell_type
+
+df_input$RowID <- rownames(df_input)
+df_input$RowID <- factor(df_input$RowID, levels = v_order_cell_type)
+
+df_input <- df_input[order(df_input$RowID), ]
+df_input
+
+
+library(ComplexHeatmap)
+library(circlize)
+
+df_input$RowID <- NULL
+df_input
+
+
+n_row = nrow(df_input)
+n_col = ncol(df_input)
+
+
+df_input
+max(df_input)
+
+df_input <- apply(df_input, 2, function(count) 100*count/max(count))
+df_input
+
+draw_numbers <- function(j, i, x, y, w, h, fill) {
+  grid.text(sprintf("%.0f", df_input[i, j]), x, y, gp = gpar(fontsize = 10))
+}
+
+
+
+
+p <- Heatmap(df_input, rect_gp = gpar(col = "black"), name = "snRNA", 
+  row_names_side = "left", 
+  cell_fun = draw_numbers,
+  column_order = c(1,2,3),
+  show_row_dend = F, 
+  show_column_dend = F, 
+  cluster_rows = F,
+  col = colorRamp2(c(0, max(df_input)), c("white", "red")),
+  row_names_gp = gpar(col = v_cols[v_order_cell_type], fontsize = 14), 
+  column_names_gp = gpar(fontsize = 14),
+ column_names_rot = 45,
+  column_names_centered = T
+) 
+p
+
+dev.off()
+
+
+
+# check with bulk data ####
+
+df_bulk <- fread("./DEG/PEC_DE_table.csv")
+
+names(df_bulk)
+
+df_bulk <- df_bulk[order(BD.p.value)]
+df_bulk <- df_bulk[! duplicated(gene_name)]
+
+
+gplots::venn(list(unique(df$gene.x), df_bulk$gene_name))
+
+
+geneticToolBox::merge_check(df, df_bulk, by.x = "gene.x", by.y = "gene_name")
+df <- merge(df, df_bulk, by.x = "gene.x", by.y = "gene_name")
+df
+
+
+df$BD.logFC <- df$BD.log2FC * log(2)
+
+df
+
+names(df)
+df[, table(sig_Meta)]
+
+df[, sig_Meta_Down := ifelse(sig_Meta == 1 & (b_meta < 0), 1, 0)]
+df[, sig_Meta_Up := ifelse(sig_Meta == 1 & (b_meta > 0), 1, 0)]
+
+df[, sig_Bulk := ifelse(BD.fdr < 0.05 , 1, 0)]
+
+df[, sig_Bulk_Down := ifelse(sig_Bulk ==1 & (BD.logFC < 0) , 1, 0)]
+df[, sig_Bulk_Up := ifelse(sig_Bulk ==1 & (BD.logFC > 0) , 1, 0)]
+
+df_overlap <- df[, list(cell_type = cell_type.x, gene = gene.x, 
+  sig_Meta_Down, sig_Meta_Up,
+  sig_Bulk_Down, sig_Bulk_Up)]
+
+
+df_overlap <- tidyr::gather(df_overlap, "cohort", "sig", -c(cell_type, gene))
+df_overlap <- df_overlap[df_overlap$sig != 0, ]
+df_overlap
+
+df_overlap_list <- split(df_overlap$gene,  f = list(df_overlap$cell_type, df_overlap$cohort))
+df_overlap_list
+
+
+N_gene <- length(unique(df$gene.x))
+N_gene
+
+cell_type_i <- "Endo"
+
+names(df_overlap_list)
+
+
+df_res <- list()
+
+for(cell_type_i in unique(df$cell_type.x)) {
+  
+  df_test <- df_overlap_list[paste0(cell_type_i, ".", c("sig_Meta_Down", "sig_Bulk_Down"))]
+  
+df_res[[paste0("Down__", cell_type_i)]] <- SuperExactTest::supertest(df_test , n = N_gene)$overlap.sizes[[3]]
+
+df_test <- df_overlap_list[paste0(cell_type_i, ".", c("sig_Meta_Up", "sig_Bulk_Up"))]
+df_res[[paste0("Up__", cell_type_i)]] <- SuperExactTest::supertest(df_test , n = N_gene)$overlap.sizes[[3]]
+
+  
+}
+
+
+
+df_res
+
+df_res <- transpose(as.data.table(df_res), keep.names = "rn")
+df_res[, cell_type := stringr::str_split_fixed(rn, "__", 2)[, 2]]
+df_res[, cohort := stringr::str_split_fixed(rn, "__", 2)[, 1]]
+df_res
+
+
+df_res <- df_res[, list(cell_type, cohort, P = V1)]
+df_res
+df_res
+max(df_res$P)
+
+df_res_s <- tidyr::spread(df_res, key = "cohort", value = P)
+df_res_s
+
+df_cols = fread('./celltype_stats.tsv')
+df_cols <- df_cols[, list(cell_type = celltype, color)]
+df_cols
+
+df_res_s <- merge(df_res_s, df_cols, by = "cell_type", sort = FALSE)
+df_res_s
+
+
+df_input2 <- df_res_s[,2:3]
+
+
+
+
+setDF(df_input2)
+row.names(df_input2) <- df_res_s$cell_type
+
+df_input2
+
+
+df_input2$RowID <- rownames(df_input2)
+df_input2$RowID <- factor(df_input2$RowID, levels = v_order_cell_type)
+
+df_input2 <- df_input2[order(df_input2$RowID), ]
+df_input2
+
+
+df_input2$RowID <- NULL
+df_input2
+
+
+library(ComplexHeatmap)
+
+
+rownames(df_input2) <- NULL # remove row names
+df_input2
+
+df_input2 <- apply(df_input2, 2, function(count) 100*count/max(count))
+
+draw_numbers <- function(j, i, x, y, w, h, fill) {
+  grid.text(sprintf("%.0f", df_input2[i, j]), x, y, gp = gpar(fontsize = 10))
+}
+
+p2 <- Heatmap(df_input2, rect_gp = gpar(col = "black"), name = "Bulk (%)", 
+  row_names_side = NULL, 
+  cell_fun = draw_numbers,
+  column_order = c(2,1),
+  show_row_dend = F, 
+  show_column_dend = F, 
+  cluster_rows = F,
+  row_names_gp = gpar(col = v_cols[v_order_cell_type], fontsize = 14), 
+  column_names_gp = gpar(fontsize = 14),
+  col = colorRamp2(c(0, max(df_input)), c("white", "red")),
+   column_names_rot = 45,
+  column_names_centered = T
+) 
+
+p2
+
+
+draw(p2, merge_legend = TRUE, heatmap_legend_side = "bottom", 
+    annotation_legend_side = "bottom")
+
+p2
+p + p2
+
+pdf(sprintf(paste0(dir_publication, "/p_%s.pdf"), "Meta_vs_merge_heatmap_3"), width = 10, height = 10)
+p + p2
+dev.off()
+
+```
+
+
+# GO
+
+```{r}
+
+library(dplyr)
+library(stringr)
+
+df <- fread("./DEG/GOBP_2023.csv")
+
+# reducedTerms
+
+dd <- fread("./DEG/fgsea_GOBP_BD_meta_enrichR.csv")  
+
+dd <- copy(df)
+  
+dd[, term_id := stringr::str_split_fixed(pathway, "\\(|\\)", 3)[, 2]]
+  
+dd
+dd <- dd[padj < 0.05]
+
+source("./f_reduce_go_term.R")
+  
+p_reducedTerms <- f_reduce_go_term(data = dd[, list(term_id, P = pval)])
+tmp <- p_reducedTerms[order(p_reducedTerms$parentTerm, p_reducedTerms$term), ]
+gplots::venn(list(tmp$go, p_reducedTerms$go))
+
+p_reducedTerms 
+  
+trait <- "BD_meta_enrichR" # R version 4.1.3; rrvgo v1.6.0
+pdf("test.pdf", width = 10, height = 10)
+rrvgo::treemapPlot(p_reducedTerms)
+dev.off()
+
+
+```
+

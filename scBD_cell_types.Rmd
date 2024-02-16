@@ -1,0 +1,113 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# setting 
+```{r}
+
+library(data.table)
+setwd("./publication/data")
+dir_publication <- "./"
+```
+
+
+# UMAP ####
+
+```{r}
+library(ACTIONet)
+
+cols = fread('./celltype_stats.tsv')
+cols$label <- 1:nrow(cols)
+v_cols <- cols$color
+names(v_cols) <- cols$celltype
+v_cols
+
+ace <-  readr::read_rds("sce_snBD_McLean_MtSinai.rds") # large file
+g_all <- plot.ACTIONet(ace, ace$Celltype_inferred, palette = v_cols, label_text_size = 4)
+pdf(paste0(dir_publication, "/p_all_UMAP.pdf"), width = 10, height = 7)
+g_all
+dev.off()
+
+```
+
+
+
+
+# marker genes
+```{r}
+
+sce <-  readr::read_rds("sce_snBD_McLean_MtSinai.rds") # large file
+
+df_cols = fread('./celltype_stats.tsv')
+v_cols <- df_cols$color
+names(v_cols) <- df_cols$celltype
+v_cols
+
+cell_type_order <- sort(unique(data$Celltype_inferred))
+cell_type_order
+
+genes = c("SLC17A7", "CUX2", "RORB", "TLE4", "GAD2", "RELN", "PVALB", "SST", "SV2C", "PLP1", "VCAN", "SLC1A2", "CSF1R")
+
+label_genes <- c("SLC17A7 (Pan-Ex)", "CUX2 (L2/3)", "RORB (L4)", "TLE4 (L5/6)", "GAD2 (Pan-In)", "RELN (Reelin)", "PVALB (PV)", "SST (SST)", "SV2C (Rosehip)", "PLP1 (Oli)", "VCAN (OPC)", "SLC1A2 (Ast)", "CSF1R (Mic)")
+
+
+df <- sce[rownames(sce) %in% genes, ]
+colData(df)
+
+library(Seurat)
+
+reducedDims(df) <- NULL
+df_s <- Seurat::as.Seurat(df)
+df_s 
+
+
+data <- as.data.table(t(assay(df, "logcounts")), keep.rownames=TRUE)
+data <- tidyr::gather(data, "group", "count", -rn)
+data
+data <- merge(data, as.data.table(df@colData,keep.rownames = TRUE)[, c("rn", "Cohort","Phenotype", "cell_group" ,"Celltype_inferred")], by = "rn")
+setDT(data)
+
+head(data)
+setnames(data, "Celltype_inferred", "cell_type")
+
+
+alpha <- 0.01
+strip.color <- NULL
+font.size <- 12
+pt.size <- 0.1
+
+
+data$group <- factor(data$group)
+cell_type_order <- sort(unique(data$cell_type))
+
+data$group <- factor(data$group, levels = genes, labels = label_genes)
+
+p <- ggplot(data, aes_string("cell_type", "count", fill = "cell_type")) +
+  geom_violin(scale = 'width', adjust = 1, trim = TRUE, size=0.3, alpha=0.5, color="pink") +
+  scale_x_discrete(limits= v_order_cell_type)  +
+  facet_grid( group ~.,  switch = "y") +
+  xlab("") + ylab("")+
+  theme(
+    axis.ticks.y = element_blank(),
+    axis.text.y.left = element_blank(),
+    strip.text.y.left = element_text(angle = 0, size = font.size),
+    strip.background = element_rect(fill = "white",colour = "black"),
+    panel.background = element_rect(fill = "white",colour = "white"),
+    axis.title = element_text(size = font.size  ),
+    axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, 
+      colour = v_cols[v_order_cell_type], size = font.size-3),
+    legend.title = element_blank(),
+    legend.position = 'none'
+  )
+
+p
+
+
+geneticToolBox::ggsave_all(sprintf(paste0(dir_publication, "%s"), "p_marker_gene_v3"), width = 9, height = 6)
+
+
+
+```

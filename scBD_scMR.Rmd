@@ -1,0 +1,224 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# setting 
+```{r}
+
+library(data.table)
+setwd("./publication/data")
+
+```
+
+
+
+# scMR results 
+```{r}
+
+df <- fread("./scMR/df_sc_MR_BD_SZ.csv") 
+
+df[, table(pval.fdr < 0.05, trait)]
+
+library(org.Hs.eg.db)
+
+
+df[, trait_cell_type := paste0(trait,"__" , cell_type)]
+
+df[, direction := ifelse(b > 0, "Up", "Down")]
+
+df_input <- df[, list(gene = gene, group = trait_cell_type)]
+
+outcome <- "BD"
+df_input <- df[trait ==  outcome]
+
+
+## cell type specific enrichment ####
+library(clusterProfiler)
+
+
+# disease enrichment ####
+df_input <- df_input[(trait ==  "BD") & (!duplicated(gene))]
+df_input <- df_input[!grepl("HLA", gene)]
+df_input 
+
+df_input <- df_input[order(b, decreasing = TRUE)]
+
+df_input$genenameID <- AnnotationDbi::mapIds(x = org.Hs.eg.db,keys =df_input$gene,
+                               keytype = "SYMBOL",column = "ENTREZID")
+df_input$genenameID
+
+
+df_input <- df_input[! is.na(genenameID)]
+
+geneList <- df_input$b
+geneList
+names(geneList) <- df_input$genenameID
+
+geneList 
+
+
+if(0) {
+  BiocManager::install("DOSE")
+devtools::install_github("wjawaid/enrichR")
+}
+
+
+library(DOSE)
+
+edo <- enrichDGN(names(geneList))
+edo
+
+str(edo)
+
+edo <- setReadable(edo, OrgDb = org.Hs.eg.db, keyType="ENTREZID") 
+  
+edo_res <- edo@result
+edo_res
+edo_res_sig <- edo_res[edo_res$p.adjust < 0.05, ]
+
+edo_res_sig
+
+library(enrichplot)
+
+edox <- setReadable(edo, 'org.Hs.eg.db', 'ENTREZID')
+
+
+p3 <- cnetplot(edox, foldChange=geneList, circular = TRUE, colorEdge = TRUE, showCategory = 4) 
+p3
+
+pdf(sprintf(paste0(dir_publication, "%s"), "scMR_disease_enrichment_circular.pdf"), width = 10, height = 10)
+p3
+dev.off()
+
+
+```
+
+
+
+# scMR versus SMR
+```{r}
+
+df_scMR <- fread("./scMR/df_sc_MR_BD_SZ.csv")
+df_SMR <- fread("./scMR/df_SMR_BD_SZ_sig.csv")
+
+
+df_scMR <- df_scMR[trait == "BD"]
+df_SMR <- df_SMR[trait == "BD"]
+
+
+df_input1 <- copy(df_scMR)
+df_input1
+df_input1[, direction := ifelse(b > 0, "Up", "Down")]
+df_input1 <- df_input1[, list(gene, cell_type, direction)]
+
+
+df_input2 <- copy(df_SMR)
+df_input2
+df_input2[, direction := ifelse(b_SMR > 0, "Up", "Down")]
+df_input2 <- df_input2[, list(gene = Gene, cell_type, direction)]
+
+df_input1$method <- "scMR"
+df_input2$method <- "SMR"
+
+
+df_input1[, length(unique(gene))]
+df_input2[, length(unique(gene))]
+
+
+unique(df_input1$gene)
+unique(df_input2$gene)
+
+
+gplots::venn(list(unique(df_input1$gene),
+unique(df_input2$gene)))
+
+
+df_input <- merge(df_input1, df_input2, by = c("gene", "cell_type", "direction"), all = T )
+df_input[, table(method.x, method.y, useNA = "ifany")]
+
+df_input[, method := ifelse(is.na(method.x) & (!is.na(method.y)), "SMR", 
+                            ifelse( (!is.na(method.x)) & (is.na(method.y)), "scMR", "shared"
+                            ))]
+
+df_input[, table(method)]
+df_input[, table(method, method.x, useNA = "ifany")]
+df_input[, c("method.x", "method.y") := NULL]
+df_input
+df_shared <- df_input[method == "shared", ]
+
+df_input[method == "shared", length(unique(gene))]
+
+df_c <- as.data.table(df_input[, table(cell_type, direction, method)])
+df_c
+df_c[, direction:= factor(direction, levels = c("Up", "Down"))]
+df_c
+
+df_c[, N := ifelse(direction == "Up", N, -1*N)]
+
+df_c[ method == "shared", sum(abs(N))]
+
+
+library(ggplot2)
+df_c
+
+df_cols = fread('./GWAS/celltype_stats.tsv')
+df_cols <- df_cols[, list(cell_type = celltype, color)]
+df_cols
+v_cols <- df_cols$color
+names(v_cols) <- df_cols$cell_type
+v_cols
+
+
+df_c <- merge(df_c, df_cols, by = "cell_type", sort = FALSE)
+df_c
+
+
+str(df_c)
+
+table(df_c$method)
+table(df_c$direction)
+
+df_c$method <- factor(df_c$method, levels = c("scMR", "SMR", "shared"))
+df_c$direction <- factor(df_c$direction, levels = c("Down", "Up"))
+
+library(viridis)
+
+v_order_cell_type <- c( "Ex-L2", "Ex-L23", "Ex-L3", "Ex-L4_MYLK","Ex-L45_MET", "Ex-L45_LRRK1", "Ex-L5b_HTR2C", "Ex-L56", "Ex-L56_CC_NTNG2",  "Ex-L6_CC_SEMA3A", "Ex-L6b_SEMA3D", "Ex-L6b_SEMA3E", "In-Rosehip_CHST9", "In-Rosehip_TRPC3","In-Reelin","In-VIP", "In-PV_Chandelier", "In-PV_Basket", "In-SST",  "Oli", "OPC","Ast",  "Mic","Endo", "Pericytes")
+v_order_cell_type
+
+
+p <- ggplot(df_c, aes(x=cell_type, y = N, fill= interaction(method, direction), width = 0.9)) +
+  geom_bar(position="stack", stat = "identity") +
+  scale_x_discrete(limits= rev(v_order_cell_type)) +
+  scale_fill_brewer(palette="Paired") +
+  labs(x = " Cell types", 
+       y = sprintf("Number of MR genes (scMR + SMR)")) +
+  theme_light() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.justification = c(0, 0), 
+    legend.position = c(0.8, 0.02), 
+    legend.title = element_blank(), legend.text = element_text(size = 12), 
+    legend.background = element_blank(), legend.key = element_blank(), 
+    legend.box.background = element_rect(colour = "black"), 
+    axis.line.x = element_line(colour = "black"), axis.line.y = element_line(colour = "black"), 
+    text = element_text(face = "bold", size = 12),
+    axis.text.y = element_text(color = v_cols[rev(v_order_cell_type)]),
+    strip.background=element_rect(fill="pink1"),
+    strip.text = element_text(colour = 'black', face = "bold", size = 12)
+  ) +
+  coord_flip()
+
+p
+
+
+if(0) {
+  geneticToolBox::ggsave_all("./DGE_SMR_scMR_barplot", p, width = 10, height = 10)
+}
+
+```
+
+

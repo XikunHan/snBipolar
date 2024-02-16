@@ -1,0 +1,243 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# setting 
+```{r}
+library(data.table)
+setwd("./publication/data")
+dir_publication <- "./"
+
+```
+
+
+# manhattan plot for BD
+```{r}
+configfile <- "./GWAS/config.txt"
+infile <- "./GWAS/gwas_file.txt"
+snpfile  <- "./GWAS/snp_file.txt"
+
+source("./f_manhattan.R")
+
+
+p <-
+  f_manhattan_annotation_BD(infile = infile,
+                            configfile = configfile,
+                            snpfile = snpfile)
+p
+
+
+dir_publication <- "./"
+
+if(0) {
+pdf(sprintf(paste0(dir_publication, "%s"), "manhan_heatmap.pdf"), width = 9, height = 12)
+p
+dev.off()
+}
+
+
+```
+
+
+# heatmap of the genes and DEGs
+```{r}
+
+
+df_sc <- fread("./GWAS/meta_analysis_IVW_MASTlmm_BD.csv")
+
+df_sc[, sig := ifelse(FDR < 0.01 & abs(b_meta) > 0.2 & (logFC.x * logFC.y > 0), 1, 0)]
+df_sc[, table(cell_type.x, sig)]
+
+length(unique(df_sc$gene.x))
+
+
+
+df_sc <- df_sc[, list(gene = gene.x, cell_type = cell_type.x, P = -log10(FDR) * sign(b_meta), sig)]
+df_sc
+
+
+df_bulk <- fread("./GWAS/PEC_DE_table.csv")
+df_bulk
+
+df_bulk <- df_bulk[order(BD.p.value)]
+df_bulk <- df_bulk[! is.na(BD.p.value)]
+df_bulk <- df_bulk[! duplicated(gene_name)]
+
+df_bulk[, sig := ifelse(BD.fdr < 0.05, 1, 0)]
+
+
+df_bulk  <- df_bulk[, list(gene = gene_name, cell_type = "Bulk", P = -log10(BD.fdr) * sign(BD.log2FC), sig)]
+df_bulk
+
+
+df_SNP <- fread("./GWAS/snp_file.txt")
+df_SNP <- df_SNP[!duplicated(gene)]
+
+df_SNP[, id_order := 1:NROW(df_SNP)]
+df_SNP
+
+
+df_m <- merge(df_SNP, df_bulk, by = "gene", all.x = TRUE, sort = F)
+df_m
+
+# merge_sc and bulk
+df_sc_bulk  <- rbind(df_sc, df_bulk)
+df_m_sc_2 <- merge(df_SNP, df_sc_bulk, by = "gene", all.x = TRUE, sort = F)
+df_m_sc_2
+unique(df_m_sc_2$gene)
+
+library(ggplot2)
+library(hrbrthemes)
+
+
+# Heatmap 
+df_m_sc_2[, sig_annotate := ifelse(sig == 1, "*", "")]
+
+df_m_sc_2[, ID := factor(ID, levels = rev(df_SNP$ID))]
+df_m_sc_2
+
+table(df_m_sc_2$cell_type, useNA = "ifany")
+
+df_m_sc_2 <- df_m_sc_2[!is.na(cell_type), ]
+df_m_sc_2 
+
+df_m_sc_2[sig_annotate == "*", length(unique(gene))]
+
+df_cols = fread('./GWAS/celltype_stats.tsv')
+v_cols <- df_cols$color
+names(v_cols) <- df_cols$celltype
+v_cols
+
+v_cols <- c(v_cols, Bulk = "red")
+v_cols
+
+
+
+cell_type_order <- c("Bulk", sort(unique(df_sc$cell_type)))
+cell_type_order
+
+
+v_order_cell_type <- c( "Ex-L2", "Ex-L23", "Ex-L3", "Ex-L4_MYLK","Ex-L45_MET", "Ex-L45_LRRK1", "Ex-L5b_HTR2C", "Ex-L56", "Ex-L56_CC_NTNG2",  "Ex-L6_CC_SEMA3A", "Ex-L6b_SEMA3D", "Ex-L6b_SEMA3E", "In-Rosehip_CHST9", "In-Rosehip_TRPC3","In-Reelin","In-VIP", "In-PV_Chandelier", "In-PV_Basket", "In-SST",  "Oli", "OPC","Ast",  "Mic","Endo", "Pericytes")
+v_order_cell_type
+
+cell_type_order <- c("Bulk", v_order_cell_type)
+cell_type_order
+
+
+
+
+# for chr
+var_col <- c(
+  RColorBrewer::brewer.pal(10, "Paired"),
+  RColorBrewer::brewer.pal(8, "Set1")[-6],
+  RColorBrewer::brewer.pal(7, "Set2"),
+  RColorBrewer::brewer.pal(12, "Set3"))
+
+var_col
+
+length(unique(df_m_sc_2$chr))
+
+var_col <- var_col[1:length(unique(df_m_sc_2$chr))]
+names(var_col) <- unique(df_m_sc_2$chr)
+var_col
+
+table(df_m_sc_2[!duplicated(ID)]$chr %in% names(var_col))
+color_gene <- var_col[as.character(df_m_sc_2[!duplicated(ID)]$chr)]
+color_gene
+
+
+dd <- df_m_sc_2[cell_type == "Bulk"]
+
+df_m_sc_2
+
+library(scales)
+
+P_heatmap <- ggplot(df_m_sc_2, aes( ID, cell_type, fill= P)) + 
+  geom_tile(color = "grey") +
+  scale_fill_gradient2(
+    low = muted("blue"),
+    mid = "white",
+    high = muted("red"),
+    midpoint = 0
+  ) +
+  geom_text(aes(label = sig_annotate), color = "black", size = 4, vjust = 0.8) +
+  theme_minimal() +
+  scale_x_discrete(breaks=df_SNP$ID, labels = df_SNP$gene) +
+  scale_y_discrete(limits=cell_type_order, position = "right") +
+  theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=0,colour = v_cols[cell_type_order], size = 7),
+    axis.text.y = element_text(face = 'bold.italic', colour = color_gene, size = 7),
+    legend.position = "bottom") +
+  coord_flip() +
+  labs(x = "", y = "", fill = "-log10(pFDR) * sign(BETA)")
+
+
+P_heatmap
+
+geneticToolBox::ggsave_all(sprintf(paste0(dir_publication, "%s"), "GWAS_gene_heatmap"), width = 6, height = 11)
+
+
+
+
+
+```
+
+
+# merge two figures
+
+```{r}
+# 
+library(cowplot)
+
+p1 <- p$p
+p1 <- p1 + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+p2 <- P_heatmap + theme(plot.margin = unit(c(0, 1, 0, 0), "cm"))
+p2
+
+pm <- plot_grid(p1, p2, labels = c('', ''), label_size = 12, rel_widths = 4:3)
+
+pm
+
+dir_publication <- "./"
+
+if(0) {
+  
+  pdf(sprintf(paste0(dir_publication, "%s"), "manhan_heatmap_merge.pdf"), width = 16, height = 12)
+  pm
+  dev.off()
+  
+}
+
+
+```
+
+
+
+# DEG and GWAS enrichment analysis in bash 
+```{bash}
+magma=./software/magma
+LDref_bfile="./g1000_eur/g1000_eur"
+
+
+mkdir -p $dir_magma
+cd $dir_magma
+
+
+# BD DEGs for each cell type
+for cell_type in `cat ./cell_types.txt`
+do
+
+echo ${cell_type}
+${magma}/magma --gene-results ${dir_magma}/out_gene_based_magma_${trait}_snp_${var_N}.genes.raw \
+--gene-covar ./BD_cell_type_DEG_all_${cell_type}.txt \
+--model direction=pos \
+--out out_${trait}_cell_type_bdDEG_all_${cell_type}
+
+done
+
+```
+
+
