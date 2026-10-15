@@ -4,23 +4,52 @@ editor_options:
   chunk_output_type: console
 ---
 
+# GWAS loci and expression integration
 
-# setting 
+
+# 1. Packages and publication-data directory 
 ```{r}
+###############################################################################
+# snBD — GWAS loci, DEG heatmap and MAGMA template
+#
+# Purpose:
+#   Combine the annotated BD Manhattan plot with locus-gene DEG
+#   results and the cell-type MAGMA enrichment template.
+#
+# Inputs:
+#   publication/data/GWAS/: config.txt, gwas_file.txt, snp_file.txt,
+#   meta_analysis_IVW_MASTlmm_BD.csv, PEC_DE_table.csv and celltype_stats.tsv.
+#   MAGMA requires externally prepared gene results/covariates and shell variables.
+#
+# Outputs:
+#   GWAS-gene heatmap; in-memory Manhattan/combined plots with
+#   optional PDF writes. MAGMA template outputs are not run during knitting.
+#
+# Dependencies:
+#   data.table, ggplot2, hrbrthemes, scales, cowplot, RColorBrewer,
+#   geneticToolBox and f_manhattan.R dependencies; rmarkdown/knitr.
+#
+#
+###############################################################################
+
+
 library(data.table)
-setwd("./publication/data")
+project_root <- normalizePath(Sys.getenv("SNBD_ROOT", unset = "."))
+publication_data <- file.path(project_root, "publication", "data")
+knitr::opts_knit$set(root.dir = publication_data)
+setwd(publication_data)
 dir_publication <- "./"
 
 ```
 
 
-# manhattan plot for BD
+# 2. Annotated BD Manhattan plot
 ```{r}
 configfile <- "./GWAS/config.txt"
 infile <- "./GWAS/gwas_file.txt"
 snpfile  <- "./GWAS/snp_file.txt"
 
-source("./f_manhattan.R")
+source(file.path(project_root, "gwas_integration", "f_manhattan.R"))
 
 
 p <-
@@ -42,7 +71,7 @@ dev.off()
 ```
 
 
-# heatmap of the genes and DEGs
+# 3. GWAS-gene expression heatmap
 ```{r}
 
 
@@ -185,7 +214,7 @@ geneticToolBox::ggsave_all(sprintf(paste0(dir_publication, "%s"), "GWAS_gene_hea
 ```
 
 
-# merge two figures
+# 4. Combine the Manhattan plot and gene heatmap
 
 ```{r}
 # 
@@ -216,8 +245,9 @@ if(0) {
 
 
 
-# DEG and GWAS enrichment analysis in bash 
-```{bash}
+# 5. MAGMA DEG enrichment (Bash template) 
+```{bash, eval=FALSE}
+# This example is not executed during rendering (eval=FALSE).
 magma=./software/magma
 LDref_bfile="./g1000_eur/g1000_eur"
 

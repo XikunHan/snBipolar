@@ -4,18 +4,52 @@ editor_options:
   chunk_output_type: console
 ---
 
+# scMR enrichment and SMR comparison
 
-# setting 
+Disease enrichment and cell-type/direction overlap from prepared MR results. 
+
+
+# 1. Packages and publication-data directory 
 ```{r}
+###############################################################################
+# snBD — MR disease enrichment and scMR/SMR comparison
+#
+# Purpose:
+#   Plot disease enrichment for MR-associated genes and compare
+#   scMR/SMR gene counts by cell type and effect direction.
+#
+# Inputs:
+#   publication/data/scMR/: df_sc_MR_BD_SZ.csv, df_SMR_BD_SZ_sig.csv.
+#   publication/data/GWAS/celltype_stats.tsv.
+#
+# Outputs:
+#   Disease-enrichment PDF and in-notebook method-overlap/count plots.
+#
+# Method overview:
+#   Select BD rows, map gene IDs, run enrichDGN, then merge BD MR/SMR genes
+#   by gene, cell type and direction and plot their counts.
+#
+# Dependencies:
+#   data.table, org.Hs.eg.db, AnnotationDbi, clusterProfiler, DOSE,
+#   enrichplot, gplots, ggplot2, viridis, geneticToolBox; rmarkdown/knitr.
+#
+#
+###############################################################################
+
+
 
 library(data.table)
-setwd("./publication/data")
+project_root <- normalizePath(Sys.getenv("SNBD_ROOT", unset = "."))
+publication_data <- file.path(project_root, "publication", "data")
+knitr::opts_knit$set(root.dir = publication_data)
+setwd(publication_data)
+dir_publication <- "./"
 
 ```
 
 
 
-# scMR results 
+# 2. scMR-associated genes and disease enrichment 
 ```{r}
 
 df <- fread("./scMR/df_sc_MR_BD_SZ.csv") 
@@ -98,7 +132,7 @@ dev.off()
 
 
 
-# scMR versus SMR
+# 3. Compare scMR and SMR genes by cell type and direction
 ```{r}
 
 df_scMR <- fread("./scMR/df_sc_MR_BD_SZ.csv")
@@ -136,6 +170,9 @@ gplots::venn(list(unique(df_input1$gene),
 unique(df_input2$gene)))
 
 
+# Multiple estimators can report the same gene/cell/direction; count it once per method.
+df_input1 <- unique(df_input1, by = c("gene", "cell_type", "direction"))
+df_input2 <- unique(df_input2, by = c("gene", "cell_type", "direction"))
 df_input <- merge(df_input1, df_input2, by = c("gene", "cell_type", "direction"), all = T )
 df_input[, table(method.x, method.y, useNA = "ifany")]
 

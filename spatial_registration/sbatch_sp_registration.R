@@ -1,11 +1,56 @@
 #!/usr/bin/env Rscript
 
+###############################################################################
+# snBD — Spatial registration of annotated cell types
+#
+# Purpose:
+#   Register each cohort's cell-type expression signatures against the
+#   spatialLIBD reference.
+#
+# Inputs:
+#   --cohort McLean|MtSinai; --sub_outpath job output directory.
+#   data/sce_snBD_McLean_MtSinai.rds with counts/metadata and gene annotations.
+#   spatialLIBD reference fetched by fetch_data(type="modeling_results").
+#
+# Outputs:
+#   df_gene_annotation.csv and sce_modeling_results_<cohort>.rds.
+#   Optional cor_layer_<cohort>.rds and publication PDFs when enabled.
+#
+# Method overview:
+#   Normalize cell-type labels; subset cohort; run registration_wrapper().
+#   Optional sections compare top-100 enrichment signatures and plot layers.
+#
+# Dependencies:
+#   data.table, optparse, spatialLIBD, SingleCellExperiment, readr, stringr;
+#   optional plots use fields and RColorBrewer.
+#
+# Usage:
+#   From repository root: bash spatial_registration/sbatch_sp_registration.sh
+#
+###############################################################################
+
 print(date())
 
+###############################################################################
+# snBD — Function: f_log()
+#
+# Purpose:
+#   Print a timestamped message.
+#
+# Inputs:
+#   mes: text to log.
+#
+# Outputs:
+#   Timestamped message in the console.
+#
+###############################################################################
 f_log <- function(mes) {
   cat("\n", sprintf('%s: %s', date(), mes), "\n")
 }
 
+
+# Record the repository root before changing the working directory.
+project_root <- normalizePath(Sys.getenv("SNBD_ROOT", unset = "."))
 
 library(data.table)
 library(optparse)
@@ -14,6 +59,7 @@ library("spatialLIBD")
 library(SingleCellExperiment, quietly = TRUE)
 
 
+# 1. Arguments ---------------------------------------------------------
 option_list <- list(
   make_option(c("--cohort"), type="character", default=NULL, help="cohort"),
   make_option(c("--sub_outpath"), type="character", default=NULL, help="sub_outpath")
@@ -27,22 +73,25 @@ print(opt)
 cohort <- opt$cohort
 sub_outpath <- opt$sub_outpath
 
+dir.create(sub_outpath, recursive = TRUE, showWarnings = FALSE)
 setwd(sub_outpath)
+dir.create("publication", showWarnings = FALSE)
 
 
 library("spatialLIBD")
 library("SingleCellExperiment")
 
+# 2. Fetch reference and prepare cohort data ---------------------------
 layer_modeling_results <- fetch_data(type = "modeling_results")
 layer_modeling_results 
 layer_modeling_results$enrichment[1:5, 1:5]
 
 
-dir_publication_data <- "./data"
+dir_publication_data <- file.path(project_root, "data")
 
 sce <- readr::read_rds(file = sprintf(paste0(dir_publication_data, "/%s.rds"), "sce_snBD_McLean_MtSinai"))
 sce$cellType <- sce$Celltype_inferred
-sce$cellType <- stringr::str_replace(sce$cellType, "-", "_")
+sce$cellType <- stringr::str_replace_all(sce$cellType, "-", "_")
 sce 
 
 set.seed(123)
@@ -56,6 +105,7 @@ gc()
 df_gene <- as.data.table(rowData(sce))
 fwrite(df_gene, "df_gene_annotation.csv")
 
+# 3. Fit registration model --------------------------------------------
 sce_modeling_results <- registration_wrapper(
   sce = sce_test,
   var_registration = "cellType",
@@ -78,6 +128,7 @@ if(0) {
 
 if(0) {
   
+# 4. Optional layer correlation and enrichment figures -----------------
   registration_t_stats <- sce_modeling_results$enrichment[, grep("^t_stat", colnames(sce_modeling_results$enrichment))]
   colnames(registration_t_stats) <- gsub("^t_stat_", "", colnames(registration_t_stats))
   registration_t_stats
@@ -122,12 +173,25 @@ if(0) {
   
   cor_layer
   
-  readr::write_rds(sce_modeling_results, paste0("cor_layer_", cohort, ".rds"))
+  readr::write_rds(cor_layer, paste0("cor_layer_", cohort, ".rds"))
   cor_layer
   
   cor_layer
   
   dir_publication <- "./publication/"
+###############################################################################
+# snBD — Function: layer_matrix_plot()
+#
+# Purpose:
+#   Draw the layer heatmap and optional cell labels.
+#
+# Inputs:
+#   matrix_values, matrix_labels, axis labels, layer heights, palette and layout.
+#
+# Outputs:
+#   Heatmap on the active graphics device.
+#
+###############################################################################
   
   
   layer_matrix_plot <- function (matrix_values, matrix_labels = NULL, xlabs = NULL, 
@@ -156,6 +220,7 @@ if(0) {
                 1)
     stopifnot(length(xlabs) == ncol(matrix_values))
     stopifnot(layerHeights[1] == 0)
+    # Helper: return interval midpoints from successive layer boundaries.
     midpoint <- function(x) {
       x[-length(x)] + diff(x)/2
     }
@@ -175,6 +240,19 @@ if(0) {
          y = rep(midpoint(layerHeights), ncol(matrix_values)), 
          as.character(matrix_labels), cex = cex * 3/4, font = 2)
   }
+###############################################################################
+# snBD — Function: layer_stat_cor_plot()
+#
+# Purpose:
+#   Clip and display cell-type/layer correlations.
+#
+# Inputs:
+#   cor_stats_layer matrix, min/max limits, optional layer heights and text size.
+#
+# Outputs:
+#   Layer heatmap using layer_matrix_plot().
+#
+###############################################################################
   
   layer_stat_cor_plot <- function (cor_stats_layer, max = 0.81, min = -max, layerHeights = NULL, 
                                    cex = 1.2) 
@@ -239,6 +317,19 @@ df_r <- gene_set_enrichment(df,
                             fdr_cut = 0.05,
                             model_type = "enrichment"
                             )
+###############################################################################
+# snBD — Function: gene_set_enrichment_plot()
+#
+# Purpose:
+#   Plot enrichment P values and odds-ratio labels.
+#
+# Inputs:
+#   enrichment table (ID/test/OR/Pval), PThresh/ORcut, palette and layout.
+#
+# Outputs:
+#   Heatmap with odds-ratio labels for BH-adjusted P values <= 0.01.
+#
+###############################################################################
   
 
 
@@ -253,7 +344,7 @@ gene_set_enrichment_plot <- function(enrichment,
            grDevices::colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(50)
          ),
          cex = 1.2) {
-  ## Re-order and shorten names if they match our data
+  ## Order cortical layers and white matter; shorten layer labels.
   if (all(unique(enrichment$test) %in% c("WM", paste0("Layer", seq_len(6))))) {
     enrichment$test <-
       factor(gsub("ayer", "", enrichment$test), levels = rev(c(paste0(
@@ -293,6 +384,7 @@ gene_set_enrichment_plot <- function(enrichment,
   }
   
   
+  # Helper: reshape one enrichment column to a test-by-gene-set plotting matrix.
   make_wide <- function(var = "OR_char") {
     res <-
       reshape(
@@ -329,7 +421,7 @@ pdf(sprintf(paste0(dir_publication, "sp_enrichment_%s.pdf"), cohort), width = 10
 gene_set_enrichment_plot(df_r)
 dev.off()
 
-pdf(sprintf(paste0(dir_publication, "sp_enrichment_%s.pdf"), cohort), width = 10, height = 8)
+pdf(sprintf(paste0(dir_publication, "sp_enrichment_default_%s.pdf"), cohort), width = 10, height = 8)
 spatialLIBD::gene_set_enrichment_plot(df_r)
 dev.off()
 

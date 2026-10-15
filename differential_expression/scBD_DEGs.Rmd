@@ -4,17 +4,50 @@ editor_options:
   chunk_output_type: console
 ---
 
-# setting 
+# Differential-expression and enrichment figures
+
+
+
+# 1. Packages and publication-data directory 
 ```{r}
+###############################################################################
+# snBD — DEG overlaps, bulk comparison and GO figures
+#
+# Purpose:
+#   Plot overlap heatmaps and GO term-reduction results from
+#   prepared DEG and enrichment tables.
+#
+# Inputs:
+#   publication/data/DEG/: meta_analysis_IVW_MASTlmm_BD.csv,
+#   df_DEGs_BD_merge_all.csv, PEC_DE_table.csv, GOBP_2023.csv,
+#   fgsea_GOBP_BD_meta_enrichR.csv; celltype_stats.tsv and GWAS/celltype_stats.tsv.
+#   The GO section requires publication/data/f_reduce_go_term.R (not included).
+#
+# Outputs:
+#   Notebook plots and publication-data PDFs; GO output is written as test.pdf.
+#
+#
+# Dependencies:
+#   data.table, grid, SuperExactTest, tidyr, stringr, ComplexHeatmap, circlize,
+#   gplots, geneticToolBox, dplyr, rrvgo; rmarkdown/knitr for rendering.
+#
+#
+###############################################################################
+
+
 
 library(data.table)
-setwd("./publication/data")
+library(grid)
+project_root <- normalizePath(Sys.getenv("SNBD_ROOT", unset = "."))
+publication_data <- file.path(project_root, "publication", "data")
+knitr::opts_knit$set(root.dir = publication_data)
+setwd(publication_data)
 dir_publication <- "./"
 ```
 
 
 
-# DEG
+# 2. Cohort/meta-analysis overlap and bulk comparison
 ```{r}
 
 df <- fread("./DEG/meta_analysis_IVW_MASTlmm_BD.csv")
@@ -77,12 +110,13 @@ df_res[, cohort := stringr::str_split_fixed(rn, "__", 2)[, 1]]
 df_res
 
 
-df_res <- df_res[, list(cell_type, cohort, P = V1)]
+# V1 contains overlap.sizes (counts), not P values.
+df_res <- df_res[, list(cell_type, cohort, overlap_n = V1)]
 df_res
 
 df_res$cohort <- factor(df_res$cohort, levels = c("Meta_McL", "Meta_MSSM", "McL_MSSM"))
 
-df_res_s <- tidyr::spread(df_res, key = "cohort", value = P)
+df_res_s <- tidyr::spread(df_res, key = "cohort", value = overlap_n)
 df_res_s
 
 df_cols = fread('./GWAS/celltype_stats.tsv')
@@ -136,9 +170,14 @@ n_col = ncol(df_input)
 df_input
 max(df_input)
 
-df_input <- apply(df_input, 2, function(count) 100*count/max(count))
+# Column-maximum scaling, not the percentage of genes overlapping.
+df_input <- apply(df_input, 2, function(count) if (max(count) == 0) rep(0, length(count)) else 100*count/max(count))
 df_input
 
+# Function: draw_numbers()
+# Purpose: add scaled counts to the current heatmap cells.
+# Inputs: ComplexHeatmap cell_fun coordinates; uses df_input/df_input2 below.
+# Output: text labels on the active graphics device.
 draw_numbers <- function(j, i, x, y, w, h, fill) {
   grid.text(sprintf("%.0f", df_input[i, j]), x, y, gp = gpar(fontsize = 10))
 }
@@ -146,14 +185,14 @@ draw_numbers <- function(j, i, x, y, w, h, fill) {
 
 
 
-p <- Heatmap(df_input, rect_gp = gpar(col = "black"), name = "snRNA", 
+p <- Heatmap(df_input, rect_gp = gpar(col = "black"), name = "snRNA (scaled count)", 
   row_names_side = "left", 
   cell_fun = draw_numbers,
   column_order = c(1,2,3),
   show_row_dend = F, 
   show_column_dend = F, 
   cluster_rows = F,
-  col = colorRamp2(c(0, max(df_input)), c("white", "red")),
+  col = colorRamp2(c(0, 100), c("white", "red")),
   row_names_gp = gpar(col = v_cols[v_order_cell_type], fontsize = 14), 
   column_names_gp = gpar(fontsize = 14),
  column_names_rot = 45,
@@ -161,7 +200,7 @@ p <- Heatmap(df_input, rect_gp = gpar(col = "black"), name = "snRNA",
 ) 
 p
 
-dev.off()
+if (dev.cur() > 1L) dev.off()
 
 
 
@@ -243,12 +282,13 @@ df_res[, cohort := stringr::str_split_fixed(rn, "__", 2)[, 1]]
 df_res
 
 
-df_res <- df_res[, list(cell_type, cohort, P = V1)]
+# V1 contains overlap.sizes (counts), not P values.
+df_res <- df_res[, list(cell_type, cohort, overlap_n = V1)]
 df_res
 df_res
-max(df_res$P)
+max(df_res$overlap_n)
 
-df_res_s <- tidyr::spread(df_res, key = "cohort", value = P)
+df_res_s <- tidyr::spread(df_res, key = "cohort", value = overlap_n)
 df_res_s
 
 df_cols = fread('./celltype_stats.tsv')
@@ -287,13 +327,18 @@ library(ComplexHeatmap)
 rownames(df_input2) <- NULL # remove row names
 df_input2
 
-df_input2 <- apply(df_input2, 2, function(count) 100*count/max(count))
+# Column-maximum scaling, not a percentage of all tested genes.
+df_input2 <- apply(df_input2, 2, function(count) if (max(count) == 0) rep(0, length(count)) else 100*count/max(count))
 
+# Function: draw_numbers()
+# Purpose: add scaled counts to the current heatmap cells.
+# Inputs: ComplexHeatmap cell_fun coordinates; uses df_input/df_input2 below.
+# Output: text labels on the active graphics device.
 draw_numbers <- function(j, i, x, y, w, h, fill) {
   grid.text(sprintf("%.0f", df_input2[i, j]), x, y, gp = gpar(fontsize = 10))
 }
 
-p2 <- Heatmap(df_input2, rect_gp = gpar(col = "black"), name = "Bulk (%)", 
+p2 <- Heatmap(df_input2, rect_gp = gpar(col = "black"), name = "Bulk (scaled count)", 
   row_names_side = NULL, 
   cell_fun = draw_numbers,
   column_order = c(2,1),
@@ -302,7 +347,7 @@ p2 <- Heatmap(df_input2, rect_gp = gpar(col = "black"), name = "Bulk (%)",
   cluster_rows = F,
   row_names_gp = gpar(col = v_cols[v_order_cell_type], fontsize = 14), 
   column_names_gp = gpar(fontsize = 14),
-  col = colorRamp2(c(0, max(df_input)), c("white", "red")),
+  col = colorRamp2(c(0, 100), c("white", "red")),
    column_names_rot = 45,
   column_names_centered = T
 ) 
@@ -323,7 +368,7 @@ dev.off()
 ```
 
 
-# GO
+# 3. GO enrichment and term reduction
 
 ```{r}
 
@@ -351,7 +396,7 @@ gplots::venn(list(tmp$go, p_reducedTerms$go))
 
 p_reducedTerms 
   
-trait <- "BD_meta_enrichR" # R version 4.1.3; rrvgo v1.6.0
+trait <- "BD_meta_enrichR"
 pdf("test.pdf", width = 10, height = 10)
 rrvgo::treemapPlot(p_reducedTerms)
 dev.off()

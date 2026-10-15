@@ -1,13 +1,59 @@
-# XH, 2023
+###############################################################################
+# snBD — Annotated BD Manhattan heatmap and locus table
+#
+# Purpose:
+#   Provide the Manhattan++-adapted plotting function called by
+#   scBD_link_GWAS_loci.Rmd.
+#
+# Inputs:
+#   GWAS table: configurable chr/pos/pvalue/maf/conseq columns.
+#   SNP annotation TSV: markername, ID, gene, chr, pos, eaf, OR, Pvalue, novel.
+#   Configuration TSV: first 10 lines skipped, followed by the palette/
+#   count/consequence/MAF classification columns.
+#
+# Outputs:
+#   A list containing final.plot (main plot), gt (annotation-table grob) and
+#   p (combined plot). Plots are not saved automatically.
+#
+# Method overview:
+#   Read/map inputs; construct positional/P-value bins; classify tiles;
+#   join locus annotations; assemble the plot and table.
+#
+# Dependencies:
+#   calibrate, data.table, reshape2, ggplot2, grid, RColorBrewer; optional plotting dependencies.
+#
+# Usage:
+#   From repository root: source("gwas_integration/f_manhattan.R").
+#   See the companion notebook for the call.
+#
+###############################################################################
+
 
 
 library(calibrate)
 library(data.table)
 library(ggplot2)
+library(grid)
 
 
-# modify Manhattan++
+# Adapted from Manhattan++
 
+###############################################################################
+# snBD — Function: f_manhattan_annotation_BD()
+#
+# Purpose:
+#   Assemble the locus-density heatmap and annotated locus table.
+#
+# Inputs:
+#   infile/configfile/snpfile: the three text inputs described above.
+#   GWS/FDR/MAF and bin widths: classification/plot settings.
+#   Column-name arguments map the input; showgenes/showrsids control labeling.
+#   outfile/drawastiff are unused while the file-export block is commented out.
+#
+# Outputs:
+#   list(final.plot, gt, p). The function does not save a plot by default.
+#
+###############################################################################
 f_manhattan_annotation_BD <-
   function(infile,
            outfile,
@@ -35,7 +81,7 @@ f_manhattan_annotation_BD <-
     pval.units <- 5 ## units to display on the y axis
     textsize <- 2 ## size of text used on labels
     
-    rebuild <- T ## set to false to retain the current matrix
+    rebuild <- T ## Rebuild the plotting matrix from the input tables.
     ## name of log file to generate if debugflag is set.
     debugfile <-
       paste("manh_",
@@ -44,18 +90,21 @@ f_manhattan_annotation_BD <-
             sep = "")
     debugflag <- F ## Turn logging on / off
     
+    # Function: waitifnot()
+    # Check an input condition and stop with a message when it fails.
     waitifnot <- function(cond, mess) {
       if (!cond) {
         ## check that condition is fulfilled
         message(mess)
         message(deparse(substitute(cond)), " is not TRUE")
-        while (TRUE) {
-        }
+        stop(mess, call. = FALSE)
       }
     }
     
     ### function returns y index on the heatmap that maps to a specific -log10(p-value)
     ## log - log10 pval to convert to index
+    # Function: log10.index()
+    # Map a -log10(P) value to the continuous plotting coordinate.
     log10.index <- function(log) {
       idx <- (log / pval.split) + 0.5
       return(idx)
@@ -63,6 +112,8 @@ f_manhattan_annotation_BD <-
     
     ### function returns y index on the heatmap that maps to a specified p-value
     ## p.val - pval to convert to index
+    # Function: p.val.index()
+    # Convert raw P to its continuous plotting coordinate.
     p.val.index <- function(p.val) {
       gws <- -1 * log10(p.val) ## convert the p-value to -log10
       idx <- log10.index(gws) ## call the log10.index function.
@@ -72,13 +123,18 @@ f_manhattan_annotation_BD <-
     ### Find the exact cell where the p-value is within on the heatmap
     ## p.val - p value
     ## pval.chunks - data structure containing cell locations for log10(pvals)
+    # Function: p.val.cell()
+    # Convert raw P to an existing discrete heatmap cell; uses the closure's bin table.
     p.val.cell <- function(p.val, pval.chunks) {
       gws <- -1 * log10(p.val) ## convert the p-value to -log10
       idx <- log10.cell(gws) ## call the log10.index function.
       return(idx)
     }
     
+    # Function: p.val.cell_2()
+    # Map annotation P values to heatmap bins; return NA for missing annotations.
     p.val.cell_2 <- function(p.val) {
+      if (is.na(p.val)) return(NA_real_)
       gws <- -1 * log10(p.val) ## convert the p-value to -log10
       idx <- log10.cell(gws) ## call the log10.index function.
       return(idx)
@@ -88,21 +144,27 @@ f_manhattan_annotation_BD <-
     ### Find the exact cell where the -log10(p-value) is within on the heatmap
     ## log - log10(pval)
     ## pval.chunks - data structure containing cell locations for log10(pvals)
+# Use the same half-open intervals as the heatmap, including its open-ended top bin.
+    # Function: log10.cell()
+    # Look up -log10(P); include the open-ended top bin and handle absent annotations.
     log10.cell <- function(log, pval.chunks) {
-      idx <-
-        pvals.cells.index$id[log >= pvals.cells.index$LP &
-                               log < pvals.cells.index$UP][[1]]
-      return (idx)
+      if (is.na(log) || log < 0) return(NA_integer_)
+      if (log >= max.pval) return(tail(pvals.cells.index$id, 1L))
+      idx <- pvals.cells.index$id[log >= pvals.cells.index$LP &
+                                   log < pvals.cells.index$UP]
+      return(if (length(idx)) idx[[1]] else NA_integer_)
     }
     
     ### Find the exact cell which the position is within on the heatmap
     ## chr - chr for index
     ## position - position for index
     ## chr.chunks - datastructure containing cell locations for chromosomes and positions.
+    # Function: chrpos.cell()
+    # Find a chromosome/position cell using the heatmap intervals: start <= position < end.
     chrpos.cell <- function(chr, position, chr.chunks) {
       slice <-
         chr.chunks[chr.chunks$chr == chr &
-                     chr.chunks$s < position & chr.chunks$e > position, ]
+                     chr.chunks$s <= position & chr.chunks$e > position, ]
       
       return (slice$posid)
     }
@@ -207,7 +269,7 @@ f_manhattan_annotation_BD <-
         data.frame(
           id = 1:length(pvals),
           LP = pvals,
-          UP = c(pvals[2:length(pvals)], max.pval)
+          UP = c(pvals[-1L], Inf)
         )
       
       final <- matrix(0, nrow = length(pvals), ncol = 0)
@@ -244,11 +306,11 @@ f_manhattan_annotation_BD <-
       ## locations to be labelled on the plot.
       pos.interest <-
         data.frame(
-          marker = character,
-          log10pval = numeric,
-          chr = numeric,
-          pos = numeric,
-          col = character
+          marker = character(),
+          log10pval = numeric(),
+          chr = numeric(),
+          pos = numeric(),
+          col = character()
         )
       
       chr <- 1
@@ -266,7 +328,7 @@ f_manhattan_annotation_BD <-
             to = max(chr.slice$pos),
             by = pos.split
           )
-        chunks[length(chunks) + 1] <- max(chr.slice$pos)
+        chunks[length(chunks) + 1] <- max(chr.slice$pos) + 1 # include the largest integer BP
         
         ## create the matrix for this chromosome (pvals * position)
         mdat <-
@@ -462,7 +524,7 @@ f_manhattan_annotation_BD <-
       }
       
       if (debugflag == T) {
-        ## close the log file if debuging is active.
+        ## Close the log file when debugging is enabled.
         close(logfile)
       }
       
@@ -478,7 +540,7 @@ f_manhattan_annotation_BD <-
       snp.info$chunk <- snpcells
       
       message("\nMelting matrix...")
-      m <- melt(final)
+      m <- reshape2::melt(final)
       names(m) <- c("pval", "pos", "val")
       
       # head(m)
@@ -778,6 +840,8 @@ f_manhattan_annotation_BD <-
     }
     
     ## convert coordinates 0-20 to coordinates for whole table.
+    # Function: table.pos()
+    # Convert annotation-table coordinates to the log-P plotting scale.
     table.pos <- function(index) {
       idx <- (index / 20) * max.pval
       return(log10.index(idx))

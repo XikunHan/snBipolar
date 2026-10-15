@@ -4,17 +4,51 @@ editor_options:
   chunk_output_type: console
 ---
 
+# Cell-type annotation figures
 
-# setting 
+UMAP and marker-gene plots for the annotated single-nucleus data. Input files are listed below.
+
+
+
+# 1. Packages and publication-data directory 
 ```{r}
+###############################################################################
+# snBD — Cell-type annotation figures
+#
+# Purpose:
+#   Display an ACTIONet embedding and marker-gene violin plots.
+#
+# Inputs:
+#   publication/data/: celltype_stats.tsv and sce_snBD_McLean_MtSinai.rds.
+#   The input object must be compatible with ACTIONet and SingleCellExperiment.
+#
+# Outputs:
+#   UMAP and marker-gene figures in publication/data/; rendered HTML when knitted.
+#
+# Method overview:
+#   Load annotated data/palette, draw UMAP, reshape selected marker expression,
+#   and draw violin plots in the same cell-type order used by the other notebooks.
+#
+# Dependencies:
+#   data.table, SingleCellExperiment, ACTIONet, readr, Seurat, tidyr,
+#   ggplot2, geneticToolBox; rmarkdown/knitr for rendering.
+#
+###############################################################################
+
+
 
 library(data.table)
-setwd("./publication/data")
+library(SingleCellExperiment)
+library(ggplot2)
+project_root <- normalizePath(Sys.getenv("SNBD_ROOT", unset = "."))
+publication_data <- file.path(project_root, "publication", "data")
+knitr::opts_knit$set(root.dir = publication_data)
+setwd(publication_data)
 dir_publication <- "./"
 ```
 
 
-# UMAP ####
+# 2. Cell-type UMAP
 
 ```{r}
 library(ACTIONet)
@@ -36,7 +70,7 @@ dev.off()
 
 
 
-# marker genes
+# 3. Marker-gene violin plots
 ```{r}
 
 sce <-  readr::read_rds("sce_snBD_McLean_MtSinai.rds") # large file
@@ -46,7 +80,7 @@ v_cols <- df_cols$color
 names(v_cols) <- df_cols$celltype
 v_cols
 
-cell_type_order <- sort(unique(data$Celltype_inferred))
+cell_type_order <- sort(unique(sce$Celltype_inferred))
 cell_type_order
 
 genes = c("SLC17A7", "CUX2", "RORB", "TLE4", "GAD2", "RELN", "PVALB", "SST", "SV2C", "PLP1", "VCAN", "SLC1A2", "CSF1R")
@@ -84,6 +118,9 @@ data$group <- factor(data$group)
 cell_type_order <- sort(unique(data$cell_type))
 
 data$group <- factor(data$group, levels = genes, labels = label_genes)
+
+# Cell-type order used across the annotation, GWAS and MR figures.
+v_order_cell_type <- c( "Ex-L2", "Ex-L23", "Ex-L3", "Ex-L4_MYLK","Ex-L45_MET", "Ex-L45_LRRK1", "Ex-L5b_HTR2C", "Ex-L56", "Ex-L56_CC_NTNG2",  "Ex-L6_CC_SEMA3A", "Ex-L6b_SEMA3D", "Ex-L6b_SEMA3E", "In-Rosehip_CHST9", "In-Rosehip_TRPC3","In-Reelin","In-VIP", "In-PV_Chandelier", "In-PV_Basket", "In-SST",  "Oli", "OPC","Ast",  "Mic","Endo", "Pericytes")
 
 p <- ggplot(data, aes_string("cell_type", "count", fill = "cell_type")) +
   geom_violin(scale = 'width', adjust = 1, trim = TRUE, size=0.3, alpha=0.5, color="pink") +
